@@ -1,0 +1,994 @@
+---
+output: pdf_document
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r load Packages, warning=FALSE, message=FALSE, echo = TRUE}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(psych)
+library(leaps)
+library(randomForest)
+library(pROC)
+library(caret)
+library(e1071)
+library(class)
+library(NeuralNetTools)
+library(nnet)
+library(MASS)
+library(Rmisc)
+library(gridExtra)
+library(InformationValue)
+library(ROCR)
+library(ROCit)
+```
+
+
+```{r Load Data, echo = TRUE}
+data <- read.table("card.csv",sep=",",skip=2,header=FALSE, stringsAsFactors = TRUE)
+header <- scan("card.csv",sep=",",nlines=2,what=character())
+
+
+
+set.seed(1234)
+n = length(data$V1)
+index <- 1:nrow(data)
+testindex <- sample(index, trunc(n)/4)
+test.data <- data[testindex,]
+train.data <- data[-testindex,]
+
+#Added this to include column names
+colnames(data) <- header[26:50]
+colnames(train.data) <- header[26:50]
+colnames(test.data) <- header[26:50]
+```
+
+
+**Brief Introduction on Data Set Cards :**  
+This data set contains information on default payments, demographic factors, credit data, history of payment, and bill statements of credit card clients in Taiwan from April 2005 to September 2005.
+
+**Attributes** 
+There are 25 variables:  
+
+1. ID: ID of each client
+2. LIMIT_BAL: Amount of given credit in NT dollars (includes individual and family/supplementary credit
+3. SEX: Gender (1=male, 2=female)
+4. EDUCATION: (1=graduate school, 2=university, 3=high school, 4=others , 5=unknown, 6=unknown)
+5. MARRIAGE: Marital status (1=married, 2=single, 3=others)
+6. AGE: Age in years
+7. PAY_0: Repayment status in September, 2005 (-1=pay duly, 1=payment delay for one month, 2=payment delay for two months, … 8=payment delay for eight months, 8. 9=payment delay for nine months and above)
+8. PAY_2: Repayment status in August, 2005 (scale same as above)
+9. PAY_3: Repayment status in July, 2005 (scale same as above)
+10. PAY_4: Repayment status in June, 2005 (scale same as above)
+11. PAY_5: Repayment status in May, 2005 (scale same as above)
+12. PAY_6: Repayment status in April, 2005 (scale same as above)
+13. BILL_AMT1: Amount of bill statement in September, 2005 (NT dollar)
+14. BILL_AMT2: Amount of bill statement in August, 2005 (NT dollar)
+15. BILL_AMT3: Amount of bill statement in July, 2005 (NT dollar)
+16. BILL_AMT4: Amount of bill statement in June, 2005 (NT dollar)
+17. BILL_AMT5: Amount of bill statement in May, 2005 (NT dollar)
+18. BILL_AMT6: Amount of bill statement in April, 2005 (NT dollar)
+19. PAY_AMT1: Amount of previous payment in September, 2005 (NT dollar)
+20. PAY_AMT2: Amount of previous payment in August, 2005 (NT dollar)
+21. PAY_AMT3: Amount of previous payment in July, 2005 (NT dollar)
+22. PAY_AMT4: Amount of previous payment in June, 2005 (NT dollar)
+23. PAY_AMT5: Amount of previous payment in May, 2005 (NT dollar)
+24. PAY_AMT6: Amount of previous payment in April, 2005 (NT dollar)
+25. default.payment.next.month: Default payment (1=yes, 0=no)
+
+
+**Problem Statement** 
+Classifying Credit defaulters and non defaulters based on features selected
+
+\newpage
+
+**Viewing datasets**
+We would like to view the different data sets after splitting as part of data exploration 
+
+
+*Viewing of number of rows in each data set*
+```{r Data Exploration, echo = TRUE}
+#Number of total Observations in overall dataset, trainset and testset
+numTotalObs <- nrow(data)
+numTrainSetObs <- nrow(train.data)
+numTestSetObs <- nrow(test.data)
+
+cbind(numTrainSetObs, numTestSetObs, numTotalObs)
+
+``` 
+
+*Number of NA Values in our data set*
+```{r NA CHECK, echo = TRUE}
+#Checking number of NAs/missing data in dataset
+sum(is.na(data))
+
+```
+
+**Data Pre - Processing**  
+The categorical variables SEX, EDUCATION, MARRIAGE and our target class default.payment.next.month can be transformed to turn them into categorical variables. Data cleaning will also be used to ensure the data is usable and understandable.  
+
+DEFAULT : add in a new factor column named 'DEFAULT' based on values in the column 'default payment next month', with 0 assigned to ‘DID NOT DEFAULT’ and 1 assigned to 'DEFAULTED'.  
+
+SEX : add in a new factor column named 'GENDER' based on values in the column 'SEX', with 1 assigned to 'MALE' and 2 assigned to 'FEMALE'.  
+
+EDUCATION : add in a new factor column named ‘EDUCATIONLEVEL’ based on values in the column ‘EDUCATION’ with 0,5 and 6 reassigned to 4 to categorize all unknowns to others.  
+
+MARRIAGE : add in a new factor column named ‘MARRIAGESTATUS’ based on values in the column ‘MARRIAGE’ with 0 reassigned to 3 to categorize all unknowns to others.
+
+
+
+
+
+
+```{r View data set, echo = TRUE}
+#Added this to view datasets
+#View(data)
+#summary(data)
+#head(train.data)
+#head(test.data)
+```
+
+\newpage
+
+
+**DISTRIBUTION OF DEFAULTERS**
+```{r Plot Distribution of DEFAULT, echo = TRUE}
+
+#Add the DEFAULT column to the database
+data$DEFAULT <- ifelse(data$`default payment next month` == 0,
+                       "DID NOT DEFAULT" ,"DEFAULTED")
+train.data$DEFAULT <- ifelse(train.data$`default payment next month` == 0,
+                             "DID NOT DEFAULT" ,"DEFAULTED")
+test.data$DEFAULT <- ifelse(test.data$`default payment next month` == 0,
+                            "DID NOT DEFAULT" ,"DEFAULTED")
+
+data$DEFAULT <- as.factor(data$DEFAULT)
+test.data$DEFAULT <- as.factor(test.data$DEFAULT)
+train.data$DEFAULT <- as.factor(train.data$DEFAULT)
+
+
+
+```
+
+```{r, echo = TRUE}
+
+#View Distribution of defaulters
+distDefaulter <- table(data$`default payment next month`)
+rownames(distDefaulter) <- c("DID NOT DEFAULT", "DEFAULTED")
+distDefaulter
+```
+
+We can see that in this data set, there are 23364 observations that did not default on their payment and 6636 that defaulted on their payment. As the distribution of defaulters is skewed as there are almost 3 times as many non defaulters as compared to defaulters, hence we would need to ensure the train data and test data are split such that the distribution remains relatively similar.  
+
+Main data    
+Defaulters / Non Defaulters = 0.296726882  
+
+```{r, echo = TRUE}
+
+#Distribution of defaulters in train set
+
+trainDefault <- ggplot(train.data, aes(x = `DEFAULT`, fill = `DEFAULT`)) + 
+  geom_bar() + 
+  labs(title = "Distribution of DEFAULT in train set") + 
+  geom_text(stat = 'count', aes(label= after_stat(count)),  
+            position = position_stack(vjust = 0.5)) + 
+  theme(text = element_text(size=(7.5)))
+
+
+
+
+```
+
+
+```{r, echo = TRUE}
+#Distribution of defaulters in test set
+
+testDefault <- ggplot(test.data, aes(x = `DEFAULT`, fill = `DEFAULT`)) + 
+  geom_bar() + 
+  labs(title = "Distribution of DEFAULT in test set") + 
+  geom_text(stat = 'count', aes(label= after_stat(count)),  
+            position = position_stack(vjust = 0.5)) +
+  theme(text = element_text(size=(7.5)))
+
+grid.arrange(trainDefault,testDefault, ncol = 2)
+```
+
+Train data  
+Defaulters / Non Defaulters = 0.283367556  
+ 
+Test data  
+Defaulters / Non Defaulters = 0.28600823  
+
+As we can see the ratio of defaulters to non defaulters is relatively similar in the main data set, Train data and Test data. Hence we can ensure that the accuracy of our models will not be affected due to the skewed dataset.
+
+\newpage
+
+**DISTRIBUTION OF DEFAULTERS BASED ON GENDER, EDUCATION LEVEL and MARRIAGE STATUS**
+```{r, echo = TRUE, fig.align='center'}
+
+
+#Plotting Distribution of Defaulters based on gender
+data$GENDER <- ifelse(data$SEX == 1, "MALE", "FEMALE")
+train.data$GENDER <- ifelse(train.data$SEX == 1, "MALE", "FEMALE")
+test.data$GENDER <- ifelse(test.data$SEX == 1, "MALE", "FEMALE")
+
+
+GenderPlot <- ggplot(data, aes(x = `GENDER`, fill = `DEFAULT`)) + 
+  geom_bar(position = "dodge") + 
+  labs(title = "Distribution of Defaulters by Gender") + 
+  geom_text(stat = 'count', aes(group=`DEFAULT`, label= after_stat(count)), 
+            vjust = - 0.2, position = position_dodge(width = 1), cex = 2.5) + 
+  theme(text = element_text(size=(5)))
+
+```
+
+
+
+```{r, echo = TRUE, fig.align='center'}
+#0 is not specified in data ? 
+#table(data$EDUCATION)
+
+#RECLASSIFY EDUCATION = 0, 5 or 6 into others.
+data$EDUCATIONLEVEL <- ifelse(data$`EDUCATION` == 5 | data$`EDUCATION` == 6 |
+                                data$`EDUCATION` == 0, 4, data$`EDUCATION`)
+
+#table(data$EDUCATIONLEVEL)
+
+#Update train and test data sets
+train.data$EDUCATIONLEVEL <- ifelse(train.data$`EDUCATION` == 5 | 
+                                      train.data$`EDUCATION` == 6 | 
+                                      train.data$`EDUCATION` == 0, 4, 
+                                    data$`EDUCATION`)
+test.data$EDUCATIONLEVEL <- ifelse(test.data$`EDUCATION` == 5 | 
+                                     test.data$`EDUCATION` == 6 | 
+                                     test.data$`EDUCATION` == 0, 4, 
+                                   data$`EDUCATION`)
+
+data$EDUCATIONLEVEL <- as.factor(data$EDUCATIONLEVEL)
+
+#Plot DEFAULT distribution by Education Level
+EducationPlot <- ggplot(data, aes(x = `EDUCATIONLEVEL`, fill = `DEFAULT`)) + 
+  geom_bar(position = "dodge") + 
+  labs(title = "Distribution of defaulters across education levels") + 
+  geom_text(stat = 'count', aes(group=`DEFAULT`, label= after_stat(count)),  
+            vjust = - 0.2, position = position_dodge(width = 1), cex = 2.5) + 
+  theme(text = element_text(size=(5)))
+
+
+```
+
+
+
+
+```{r , echo = TRUE}
+#No specification of 0 in dataset
+#table(data$MARRIAGE)
+
+#Combine 0 into 3 and include it as others.
+data$MARRIAGESTATUS <- ifelse(data$`MARRIAGE` == 0 | 
+                                data$`MARRIAGE` == 3, 3, data$`MARRIAGE`)
+
+#Updating Marriagestatus in train and test data
+train.data$MARRIAGESTATUS <- ifelse(train.data$`MARRIAGE` == 0 | 
+                                      train.data$`MARRIAGE` == 3, 
+                                    3, train.data$`MARRIAGE`)
+test.data$MARRIAGESTATUS <- ifelse(test.data$`MARRIAGE` == 0 | 
+                                     test.data$`MARRIAGE` == 3, 
+                                   3, test.data$`MARRIAGE`)
+
+
+data$MARRIAGESTATUS <- as.factor(data$MARRIAGESTATUS)
+
+#Plot default distribution across marriage status
+MarriagePlot <- ggplot(data, aes(x = `MARRIAGESTATUS`, fill = `DEFAULT`)) + 
+  geom_bar(position = "dodge") + 
+  labs(title = "Distribution of defaulters across marriage statuses") + 
+  geom_text(stat = 'count', aes(group=`DEFAULT`, label= after_stat(count)),  
+            vjust = - 0.2, position = position_dodge(width = 1), cex = 2.5) + 
+  theme(text = element_text(size=(5)))
+
+grid.arrange(GenderPlot, EducationPlot, MarriagePlot, ncol = 2)
+
+
+```
+
+There is 18112 females in the data set as compared to 11888 males. From our Gender bar plot, 20.78% of females are defaulters and 24.17% of males are defaulters.  
+    
+As we can see from the stacked bar chart of education levels, most people across all education levels are non defaulters.  
+
+  
+From the plot of defaulters across marriage status, we cannot determine any true relationship between defaulters and marriage status.  
+
+\newpage
+
+**Details of PAY VARIABLES**  
+
+PAY VARIABLES : historical past payments.  
+-2: No consumption;  
+-1: Paid in full;  
+ 0: The use of revolving credit;  
+ 1 = payment delay for one month;  
+ 2 = payment delay for two months;  
+ . 
+ . 
+ .  
+ 8 = payment delay for eight months;  
+ 9 = payment delay for nine months and above.  
+ 
+ 
+```{r , echo = TRUE}
+#table(data$PAY_0)
+
+#Plot default distribution across PAY_0
+ggplot(data, aes(x = `PAY_0`, fill = `DEFAULT`)) + 
+  geom_bar(position = "dodge") + 
+  labs(title = 
+         "Distribution of defaulters across Repayment Status in September 2005") + 
+  geom_text(stat = 'count', aes(group=`DEFAULT`, label= after_stat(count)),  
+            vjust = - 0.2, position = position_dodge(width = 1), size = 3)
+
+```
+  We can see that majority of Non Defaulters made use of non revolving credit. 
+\newpage
+
+**DISTRIBUTION FOR AGE and LIMIT_BAL**
+```{r , echo = TRUE}
+summary(data$AGE)
+#Distribution of Age on Default
+AgePlot <- ggplot(data, aes(x = `DEFAULT`, y = `AGE`)) + 
+  geom_boxplot() 
+
+```
+
+
+```{r, echo = TRUE}
+
+LimitPlot <- ggplot(data, aes(x = `DEFAULT`, y = `LIMIT_BAL`)) + 
+  geom_boxplot()
+
+grid.arrange(AgePlot, LimitPlot, ncol = 2)
+
+```
+    As we can see a large proportion of our data set consists of people aged between 30 - 40. 
+The data set only contains those older than 21 years old as that is the minimum age to apply for a credit card. 
+  
+   We can also see, generally the amount of credit given for non defaulters is higher than that of defaulters. Also, the average credit given for non defaulters is higher than that of defaulters.
+
+  Although there are many outliers present, in absence of the context, removal of these outliers will affect the accuracy of our results. Therefore, we will keep all observations in our dataset.  
+\newpage
+
+
+**FEATURE SELECTION**
+
+  As there are many features (23 features), hence to ensure we get a reliable result, we need to ensure that the curse of dimensionality does not occur. Hence feature selection is important to ensure we pick the model that is the simplest and gives us the least Sum of Squared Errors.
+
+
+
+**FILTER METHOD**
+
+```{r, echo = TRUE}
+#Filter Feature Selection as data set is large with many attributes
+# Determining Useful continuous Features by Correlation with target Feature 
+# DEFAULT excluding categorical variables of SEX EDUCATION MARRIAGE. 
+#head(data)
+#ncol(data)
+contd <- cor(data[c(1,2,6,7,8,9,10,11,12,13,14,
+                    15,16,17,18,19,20,21,22,23,24,25)])
+corrplot(contd, method = "number",addCoef.col = 1,
+         number.cex = 0.3, tl.cex = 0.3)
+
+```
+  
+  
+For Continuous Variables :  
+We hypothesize that the attributes with high correlations with DEFAULT will be useful.
+Hence we hypothesize that PAY_1 to PAY_6 will be useful features. 
+
+\newpage
+
+H0 : Gender and Default are independent    
+H1 : Both attributes are associated    
+```{r Gender chi2, echo = TRUE}
+
+# Determining useful categorical Features by ChiSquare test on target Feature DEFAULT 
+# with GENDER, EDUCATIONLEVEL, MARRIAGESTATUS
+
+#H0 : Gender and Default are independent
+#H1 : Both attributes are associated
+
+GenderChi2 <- chisq.test(table(data$GENDER, data$DEFAULT))
+GenderChi2
+#GenderChi2$p.value < 0.05
+#Hence as P-value < 0.05, we can reject H0 in favor of 
+#H1 that Gender and Default are independent. 
+#Thus we should include Gender as a possibly 
+#useful input attribute to determine Default.
+```
+  Hence as P-value < 0.05, we can reject H0 in favor of H1 that Gender and Default are independent. 
+Thus we should include Gender as a possibly useful input attribute to determine Default.
+
+
+
+H0 : Education Level and Default are Independent  
+H1 : Both attributes are associated  
+```{r, echo = TRUE}
+#H0 : Education Level and Default are Independent
+#H1 : Both attributes are associated
+EducationChi2 <- chisq.test(table(data$EDUCATIONLEVEL, data$DEFAULT))
+EducationChi2
+#EducationChi2$p.value < 0.05
+#Hence as P-value < 0.05, we can reject H0 in favor of 
+#H1 that EducationLevel and Default are independent. 
+#Thus we should include EducationLevel as a possibly 
+#useful input attribute to determine Default.
+
+```
+  Hence as P-value < 0.05, we can reject H0 in favor of H1 that EducationLevel and Default are independent. 
+Thus we should include EducationLevel as a possibly useful input attribute to determine Default.
+
+
+
+H0 : Marriage Status and Default are Independent  
+H1 : Both attributes are associated  
+```{r, echo = TRUE}
+#H0 : Marriage Status and Default are Independent
+#H1 : Both attributes are associated
+MarriageChi2 <- chisq.test(table(data$MARRIAGESTATUS, data$DEFAULT))
+MarriageChi2
+#MarriageChi2$p.value < 0.05
+#Hence as P-value < 0.05, we can reject H0 in favor of 
+#H1 that MarriageStatus and Default are independent. 
+#Thus we should include MarriageStatus as a possibly 
+#useful input attribute to determine Default.
+```
+  Hence as P-value < 0.05, we can reject H0 in favor of H1 that MarriageStatus and Default are independent. 
+Thus we should include MarriageStatus as a possibly useful input attribute to determine Default.
+
+
+For categorical Variables : 
+As the p-values of the chi2 test between Gender and Default, EducationLevel and Default, MarriageStatus and Default are all < 0.05, thus we can reject H0 that they are independent of Default and we would include Gender, EducationLevel and Marriage Status as possibly useful attributes in predicting Default.
+
+
+\newpage
+
+**WRAPPER METHOD**
+
+Backward / Forward Approach 
+```{r Backward Method, echo = TRUE, fig.align='center'}
+#Backward approach
+#head(train.data)
+#summary(train.data)
+outbackward <- regsubsets(as.factor(DEFAULT) ~ LIMIT_BAL +
+                            GENDER + 
+                            EDUCATIONLEVEL + 
+                            MARRIAGESTATUS + 
+                            AGE + 
+                            PAY_0 + PAY_2 + PAY_3 + PAY_4 + PAY_5 + PAY_6 + 
+                            BILL_AMT1 + BILL_AMT2 + BILL_AMT3 + 
+                            BILL_AMT4 + BILL_AMT5 + BILL_AMT6 + 
+                            PAY_AMT1 +  PAY_AMT2 + PAY_AMT3 + 
+                            PAY_AMT4 + PAY_AMT5 + PAY_AMT6, 
+                          data = train.data, method = "backward")
+
+#summary(outbackward)
+coef(outbackward, 8)
+```
+
+```{r, echo = TRUE, fig.align='center'}
+#Forward Approach
+outforward <- regsubsets(as.factor(DEFAULT) ~ LIMIT_BAL + 
+                           GENDER + 
+                           EDUCATIONLEVEL + 
+                           MARRIAGESTATUS +
+                           AGE + 
+                           PAY_0 + PAY_2 + PAY_3 +
+                           PAY_4 + PAY_5 + PAY_6 + 
+                           BILL_AMT1 + BILL_AMT2 + BILL_AMT3 +
+                           BILL_AMT4 + BILL_AMT5 + BILL_AMT6 + 
+                           PAY_AMT1 +  PAY_AMT2 + PAY_AMT3 + 
+                           PAY_AMT4 + PAY_AMT5 + PAY_AMT6, 
+                          data = train.data, method = "forward")
+
+#summary(outforward)
+coef(outforward, 8)
+
+par(mfrow = c(1,2))
+plot(outbackward)
+plot(outforward)
+
+```
+From our Forward and Backward Stepwise selection, as MARRIAGESTATUS, PAY_0, PAY_2, PAY_3, BILL_AMT1, PAY_AMT1 are identified as part of the top 8 variables for both the Forward and Backward Step wise selection, hence there is a high chance that they are important in predicting our desired class DEFAULT. 
+
+
+\newpage
+
+STEP AIC backward approach
+```{r, echo = TRUE}
+#STEP AIC
+lmfull <- lm(`default payment next month` ~ LIMIT_BAL + 
+               GENDER + 
+               EDUCATIONLEVEL + 
+               MARRIAGESTATUS + 
+               AGE + 
+               PAY_0 + PAY_2 + PAY_3 + 
+               PAY_4 + PAY_5 + PAY_6 + 
+               BILL_AMT1 + BILL_AMT2 + BILL_AMT3 + 
+               BILL_AMT4 + BILL_AMT5 + BILL_AMT6 + 
+               PAY_AMT1 +  PAY_AMT2 + PAY_AMT3 + 
+               PAY_AMT4 + PAY_AMT5 + PAY_AMT6, data = train.data)
+stepAIC <- stepAIC(lmfull, data = train.data, direction = "backward", trace = 0)
+stepAIC$anova
+
+```
+
+
+Firstly, by using the StepAIC model which is a Wrapper method making use of stepwise selection, we get a model consisting of: 
+LIMIT_BAL, GENDER, EDUCATIONLEVEL, MARRIAGESTATUS, AGE, PAY_0, PAY_2, PAY_3, PAY_5, PAY_AMT1, PAY_AMT2, PAY_AMT4, PAY_AMT5, BILL_AMT1, BILL_AMT2.
+
+
+  We can see that the features included in this StepWise model are also included in the top 8 variables from our stepwise (Forward, Backward) feature selection methods.  
+
+From the Correlation Matrix, we can see the continuous variables included in our model, PAY_0, PAY_2, PAY_3, PAY_5, PAY_AMT1, PAY_AMT2, PAY_AMT4, PAY_AMT5, BILL_AMT1 and BILL_AMT2 have relatively high correlation with DEFAULT which is our targeted class for classification. Hence, they may be useful in predicting our targeted class DEFAULT and should be selected as a useful feature.  
+
+Using the Chi Square test for categorical variables, GENDER, EDUCATIONLEVEL and MARRIAGESTATUS might also be useful in predicting our targeted class of DEFAULT.  
+
+\newpage
+
+**RANDOM FOREST ON FULL MODEL** 
+```{r, echo = TRUE}
+model_rf <- randomForest(DEFAULT ~ LIMIT_BAL + 
+                            GENDER + 
+                            EDUCATIONLEVEL + 
+                            MARRIAGESTATUS + 
+                            AGE + 
+                            PAY_0 + PAY_2 + PAY_3 + 
+                            PAY_4 + PAY_5 + PAY_6 + 
+                            BILL_AMT1 + BILL_AMT2 + BILL_AMT3 + 
+                            BILL_AMT4 + BILL_AMT5 + BILL_AMT6 + 
+                            PAY_AMT1 +  PAY_AMT2 + PAY_AMT3 + 
+                            PAY_AMT4 + PAY_AMT5 + PAY_AMT6, data = train.data)
+
+
+
+importance(model_rf)
+
+
+
+#Important Features
+# PAY_0(795.70416), 
+# BILL_AMT1(451.39200), 
+# AGE(434.38544),
+# BILL_AMT2(415.45371), 
+# BILL_AMT3(392.83784), 
+# LIMIT_BAL(391.76630),
+# PAY_AMT1(392.17244),
+# BILL_AMT4(385.50495),
+# BILL_AMT5(376.70570),
+# BILL_AMT6(377.39560),
+# PAY_AMT2(372.90284),
+# PAY_AMT3(352.98059),
+# PAY_AMT4(331.10005), remove till here 81.22%
+# PAY_AMT5(336.94235), 81.40%
+# PAY_AMT6(349.18925), 81.49% 
+# PAY_2(311.18750) , remove till here 81.67%
+
+
+# PAY_3(218.57889), 81.39%
+# PAY_4(179.64499),
+# PAY_5(166.11493),
+# EDUCATIONLEVEL(153.02739),
+# PAY_6(152.13679),
+# MARRIAGESTATUS(96.32323),
+# GENDER(82.53308),
+
+
+```
+
+  Making use of the Random Forest model on the full dataset gives us the relative importance of each feature. From this list of features ranked based on their importance, we can also see that all of our selected continuous variables aforementioned have high importance. Although the Random Forest Model places low importance to the categorical variables of GENDER, EDUCATIONLEVEL and MARRIAGESTATUS, we have decided to keep these in our model due to our results from the Chi Square Test.
+
+\newpage
+
+
+**Checking SSE for each model**
+```{r, echo = TRUE}
+#SSE For Full Model
+lmfull <- lm(`default payment next month` ~ LIMIT_BAL + 
+               GENDER + 
+               EDUCATIONLEVEL + 
+               MARRIAGESTATUS + 
+               AGE + 
+               PAY_0 + PAY_2 + PAY_3 + 
+               PAY_4 + PAY_5 + PAY_6 + 
+               BILL_AMT1 + BILL_AMT2 + BILL_AMT3 + 
+               BILL_AMT4 + BILL_AMT5 + BILL_AMT6 + 
+               PAY_AMT1 +  PAY_AMT2 + PAY_AMT3 + 
+               PAY_AMT4 + PAY_AMT5 + PAY_AMT6, data = train.data)
+
+#Train SSE for Full Model
+fittedFullTrain <- predict(lmfull, data = train.data)
+yactualFullTrain <- train.data$`default payment next month`
+SSEfullTrain <- sum((fittedFullTrain - yactualFullTrain)^2)
+
+
+#Test SSE for Full Model
+fittedFullTest <- predict(lmfull, data = test.data)
+yactualFullTest <- test.data$`default payment next month`
+SSEfullTest <- sum((fittedFullTest - yactualFullTest)^2)
+
+
+
+#SSE For WRAPPER METHOD MODEL (STEP METHOD)
+lmWrap <- lm(`default payment next month` ~ LIMIT_BAL + 
+               GENDER + 
+               EDUCATIONLEVEL + 
+               MARRIAGESTATUS + 
+               AGE + 
+               PAY_0 + PAY_2 + PAY_3 + PAY_5 + 
+               PAY_AMT1 + PAY_AMT2 + PAY_AMT4 + PAY_AMT5 + 
+               BILL_AMT1 + BILL_AMT2, 
+             data = train.data)
+
+fittedWrapTrain <- predict(lmWrap, data = train.data)
+yactualWrapTrain <- train.data$`default payment next month`
+SSEWrapTrain = sum((fittedWrapTrain - yactualWrapTrain)^2)
+
+
+fittedWrapTest <- predict(lmWrap, data = test.data)
+yactualWrapTest <- test.data$`default payment next month`
+SSEWrapTest =  sum((fittedWrapTest - yactualWrapTest)^2)
+
+#SSE For RANDOM FOREST MODEL
+lmRF <- lm(`default payment next month` ~ PAY_0 + BILL_AMT1 + AGE + 
+             BILL_AMT2 + BILL_AMT3 + LIMIT_BAL + PAY_AMT1 + 
+             BILL_AMT4 + BILL_AMT5 + BILL_AMT6 + 
+             PAY_AMT2 + PAY_AMT3 + PAY_AMT4 + PAY_AMT5 + 
+             PAY_AMT6 + PAY_2 , data = train.data) 
+
+fittedRFTrain <- predict(lmRF, data = train.data)
+yactualRFTrain <- train.data$`default payment next month`
+SSERFTrain = sum((fittedRFTrain - yactualRFTrain)^2)
+
+
+fittedRFTest <- predict(lmRF, data = test.data)
+yactualRFTest <- test.data$`default payment next month`
+SSERFTest =  sum((fittedRFTest - yactualRFTest)^2)
+
+
+cbind(SSEfullTrain, SSEWrapTrain, SSERFTrain)
+cbind(SSEfullTest, SSEWrapTest, SSERFTest)
+
+```
+
+  Lastly, we decided to find the Sum of Squared Errors of the stepwise model and compare it with that of the full model and the model produced from Random Forest. Despite the Sum of Squared Error being the least for the Random Forest Model, as we decided that the categorical features are possibly useful features in predicting DEFAULT, we have decided to make use of the model from our stepwise feature selection. Furthermore, the Sum of Squared Error for both the full model and stepwise model are relatively similar despite the stepwise model having much lesser features and being simpler. 
+
+
+Our final selected features consists of:  
+1. LIMIT_BAL  
+2. GENDER  
+3. EDUCATIONLEVEL  
+4. MARRIAGESTATUS  
+5. AGE  
+6. PAY_0  
+7. PAY_2  
+8. PAY_3  
+9. PAY_5  
+10. PAY_AMT1  
+11. PAY_AMT2  
+12. PAY_AMT4  
+13. PAY_AMT5  
+
+\newpage
+
+
+**MODEL SELECTION**
+
+Each model has its own strengths and weaknesses. Hence, we have decided to use 5 models to classify between Defaulters and Non Defaulters and then evaluate the accuracy to determine the best model for this problem. 
+
+1. Random Forest, 2. Support Vector Machine, 3. Logistic Regression, 4. K nearest Neighbours, 5. Neural Networks,  
+
+
+
+
+
+*RANDOM FOREST with FINALIZED FEATURES*
+```{r, echo = TRUE}
+#STEP MODEL 
+model_rf3 <- randomForest(DEFAULT ~ LIMIT_BAL + 
+                            GENDER + 
+                            EDUCATIONLEVEL + 
+                            MARRIAGESTATUS + 
+                            AGE + 
+                            PAY_0 + PAY_2 + PAY_3 + PAY_5 + 
+                            PAY_AMT1 + PAY_AMT2 + PAY_AMT4 + PAY_AMT5 + 
+                            BILL_AMT1 + BILL_AMT2 , data = train.data)
+
+importance(model_rf3)
+preds_rf3 <- predict(model_rf3, test.data)
+
+rf_confMat <- caret::confusionMatrix(data = preds_rf3, reference = test.data$DEFAULT)
+accRF <- rf_confMat$overall[1]
+
+rf_confMat$table
+accRF
+
+F1_rf <- rf_confMat$byClass[7]
+F1_rf
+
+#Plot ROC Curve
+preds_rf.ROC <- rocit(as.numeric(preds_rf3), as.numeric(test.data$DEFAULT))
+#plot(preds_rf.ROC)
+AUCRF <- preds_rf.ROC$AUC
+
+AUCRF.df <- as.data.frame(AUCRF)
+colnames(AUCRF.df) <- c("Area Under Curve Random Forest")
+AUCRF.df
+```
+  As we can see, by running a Random Forest Model on our selected features and predicting it on our test data set which was held out, we achieve an accuracy of 81.45% and F1 - score of 0.4777. The area under the ROC Curve was also calculated to be 0.6599.
+
+\newpage
+
+*Support Vector Machine*
+```{r SVM, echo = TRUE}
+
+svm.model<- svm(DEFAULT ~ LIMIT_BAL + 
+               GENDER + 
+               EDUCATIONLEVEL + 
+               MARRIAGESTATUS + 
+               AGE + 
+               PAY_0 + PAY_2 + PAY_3 + PAY_5 + 
+               PAY_AMT1 + PAY_AMT2 + PAY_AMT4 + PAY_AMT5 + 
+               BILL_AMT1 + BILL_AMT2, 
+               data = train.data
+               ,type = "C-classification", kernel = "linear")
+svm.model
+
+#svm.model$SV
+
+preds_svm <- predict(svm.model, test.data)
+
+svm_confMat <- caret::confusionMatrix(data = preds_svm, reference = test.data$DEFAULT)
+
+svm_confMat$table
+F1_svm <- svm_confMat$byClass[7]
+
+accSVM <- svm_confMat$overall[1]
+accSVM
+
+F1_svm
+
+#Plot ROC Curve
+preds_SVM.ROC <- rocit(as.numeric(preds_svm), as.numeric(test.data$DEFAULT))
+#plot(preds_SVM.ROC)
+AUCSVM <- preds_SVM.ROC$AUC
+
+
+AUCSVM.df <- as.data.frame(AUCSVM)
+colnames(AUCSVM.df) <- c("Area Under Curve SVM")
+AUCSVM.df
+
+```
+  After running SVM with our selected Features and predicting it on our held out test data, we achieve an accuracy of 80.6% and F1-Score of 0.3858. The Area under the ROC was also calculated to be 0.6161.
+
+\newpage
+
+*LOGISTIC REGRESSION* 
+```{r, echo = TRUE}
+log.model <- glm(`default payment next month` ~ LIMIT_BAL + 
+               GENDER + 
+               EDUCATIONLEVEL + 
+               MARRIAGESTATUS + 
+               AGE + 
+               PAY_0 + PAY_2 + PAY_3 + PAY_5 + 
+               PAY_AMT1 + PAY_AMT2 + PAY_AMT4 + PAY_AMT5 + 
+               BILL_AMT1 + BILL_AMT2, 
+               data = train.data, family = "binomial")
+
+summary(log.model)
+
+
+preds_log <- predict(log.model, test.data)
+optcutglm <- optimalCutoff(test.data$`default payment next month`, preds_log, optimiseFor = "misclasserror")
+preds_log.assigned <- ifelse(preds_log > optcutglm, "DEFAULTED", "DID NOT DEFAULT")
+
+log_confMat <- caret::confusionMatrix(data = as.factor(preds_log.assigned), reference = test.data$DEFAULT)
+
+```
+
+\newpage
+
+```{r, echo = TRUE}
+log_confMat$table
+
+accLog <- log_confMat$overall[1]
+accLog
+
+F1_log <- log_confMat$byClass[7]
+F1_log
+
+#Plot ROC Curve
+preds_logROC <- ifelse(preds_log > optcutglm, 1, 0)
+preds_log.ROC <- rocit(preds_logROC, test.data$`default payment next month`)
+#plot(preds_log.ROC)
+AUClog <- preds_log.ROC$AUC
+
+AUClog.df <- as.data.frame(AUClog)
+colnames(AUClog.df) <- c("Area Under Curve Logistic Regression")
+AUClog.df
+
+```
+  After running a Logistic Regression with our selected Features and predicting it on our held out test data, we achieve an accuracy of 81.4% and F1-Score of 0.4669. The Area under the ROC was also calculated to be 0.6541.
+
+\newpage
+
+*K Nearest Neighbours*
+```{r, echo = TRUE}
+
+trctrl <- trainControl(method = "repeatedcv",
+                       number = 10,
+                       repeats = 3)
+
+knn.model <- train(DEFAULT ~ LIMIT_BAL + 
+               GENDER + 
+               EDUCATIONLEVEL + 
+               MARRIAGESTATUS + 
+               AGE + 
+               PAY_0 + PAY_2 + PAY_3 + PAY_5 + 
+               PAY_AMT1 + PAY_AMT2 + PAY_AMT4 + PAY_AMT5 + 
+               BILL_AMT1 + BILL_AMT2, 
+               data = train.data, 
+               method = "knn", 
+               trControl = trctrl, 
+               tuneLength = 20)
+
+
+preds_knn <- predict(knn.model, newdata = test.data)
+knn_confMat<- caret::confusionMatrix(preds_knn, test.data$DEFAULT)
+
+
+knn_confMat$table
+accKnn <- knn_confMat$overall[1]
+accKnn
+
+F1_knn <- knn_confMat$byClass[7]
+F1_knn
+
+#Plot ROC Curve
+preds_knn.raw <- predict(knn.model, newdata = test.data, type = "raw")
+preds_knnObj <- prediction(as.numeric(preds_knn.raw), as.numeric(test.data$DEFAULT))
+preds_knnPerfObj <- performance(preds_knnObj, "tpr", "fpr")
+#plot(preds_knnPerfObj, main = "ROC Curve", col = 2, lwd = 2) + 
+#abline(a = 0, b = 1, lwd = 2, lty = 3, col = "black")
+
+AUCknn <- performance(preds_knnObj, measure = "auc")
+AUCknn <- AUCknn@y.values[[1]]
+AUCknn.df <- as.data.frame(AUCknn)
+colnames(AUCknn.df) <- c("Area Under Curve K Nearest Neighbours")
+AUCknn.df
+
+```
+
+  After running a K nearest Neighbor Model with our selected Features on the train set, the model selects k = 43 to optimize the accuracy of the model. The model was ran using 10 fold cross validation and was repeated 3 times by the model. The model was then predicted on our held out test data, and we achieve an accuracy of 77.8% and F1-Score of 0.0856. The Area under the ROC was also calculated to be 0.5168.
+
+
+*Neural Networks* 
+```{r, echo = TRUE}
+set.seed(1234)
+fmla <- as.formula(DEFAULT ~ LIMIT_BAL + 
+               GENDER + 
+               EDUCATIONLEVEL + 
+               MARRIAGESTATUS + 
+               AGE + 
+               PAY_0 + PAY_2 + PAY_3 + PAY_5 + 
+               PAY_AMT1 + PAY_AMT2 + PAY_AMT4 + PAY_AMT5 + 
+               BILL_AMT1 + BILL_AMT2)
+
+nn.model <- nnet(fmla, data = train.data, maxit = 1000, size = 20, trace = 0)
+
+preds_nn <- predict(nn.model, newdata = test.data, type = c("class"))
+
+
+nn_confMat <- caret::confusionMatrix(data = as.factor(preds_nn), 
+                                     reference = test.data$DEFAULT)
+nn_confMat$table
+
+F1_nn <- 0 #0 as TPR is 0
+
+accNN <- nn_confMat$overall[1]
+accNN
+
+
+#Plot ROC Curve
+preds_nnObj <- predict(nn.model, newdata = test.data, type = "raw")
+optcutNN <- optimalCutoff(test.data$`default payment next month`, 
+                          preds_nnObj, optimiseFor = "misclasserror")
+preds_NN.assigned <- ifelse(preds_nnObj > optcutNN, 
+                            "DEFAULTED", "DID NOT DEFAULT")
+
+preds_nn.ROC <- rocit(as.numeric(as.factor(preds_NN.assigned)), 
+                      as.numeric(test.data$`DEFAULT`))
+#plot(preds_nn.ROC)
+AUCnn <- preds_nn.ROC$AUC
+
+AUCnn.df <- as.data.frame(AUCnn)
+colnames(AUCnn.df) <- c("Area Under Curve Neural Network")
+AUCnn.df
+
+```
+
+  We run a Neural Network with our selected Features and predict it on our held out test data. The Neural Network converges at the 340th iteration and we achieve an accuracy of 77.7% and F1-Score of 0. This is because the Neural Network Model predicts all observations as DID NOT DEFAULT, hence the TRUE POSITIVE = 0. The Area under the ROC was also calculated to be 0.4999.
+
+\newpage
+
+**EVALUATION**
+
+ACCURACY 
+```{r, echo = TRUE}
+#ACCURACY
+cbind(accSVM, accNN, accLog, accKnn, accRF)
+```
+
+We observe Logistic Regression and Random Forest produces the highest accuracy at 81.4%
+
+
+
+F1 - SCORE
+```{r, echo = TRUE}
+#F1 SCORE
+cbind(F1_svm, F1_nn, F1_log, F1_knn, F1_rf)
+```
+
+We observe Random Forest has the highest F1 Score at 0.474 followed by Logistic Regression at 0.466
+
+
+AREA UNDER ROC CURVE
+```{r, echo = TRUE}
+
+par(mfrow = c(2, 3))
+plot(preds_SVM.ROC) 
+title(main = "SVM ROC")
+plot(preds_nn.ROC)
+title(main = "Neural Network ROC")
+plot(preds_log.ROC)
+title(main = "Logistic Regression ROC")
+plot(preds_knnPerfObj, main = "K Nearest Neighbours ROC", col = 2, lwd = 2) + 
+abline(a = 0, b = 1, lwd = 2, lty = 3, col = "black")
+plot(preds_rf.ROC)
+title(main = "Random Forest ROC")
+
+cbind(AUCSVM, AUCnn, AUClog, AUCknn, AUCRF)
+
+```
+
+We observe Random Forest has the largest Area Under Curve at 0.659 followed by Logistic Regression at 0.654.
+
+
+From our evaluation results, the predictive performance of Random Forest is slightly better than  Logistic Regression. However, the computational time needed for Logistic Regression is much less as compared to Random Forest. Hence, in this context, Logistic Regression would be the most optimal way to classify Defaulters and Non Defaulters with Random Forest being a useful alternative.  
+  
+
+**IMPROVEMENTS**  
+
+
+
+H0 = Person is Non Default  
+H1 = Person is Defaulter  
+
+Type I error: Rejection of H0 when it is true  
+Classifying a Non-Default as Default  
+Type II error: Failure to reject H0 when it is false  
+Classifying Default as Non-Default  
+
+1. Assigning Costs based on context  
+Depending on the context, we can decide whether to prioritize type I or type II error. If we decide that the misclassification of a Defaulter as Non Default (type II) has more negative repercussions, we can make use of costs to penalize the misclassification. As the data set is from a bank, they might place more importance in correctly classifying Defaulters as wrongly classifying Defaulters will result in a loss of money. Hence, our model will prioritize the correct classification of Defaulters, increasing our True Negative Rate (Specificity).
+
+2. Including weights to the model  
+Since there are significantly more Non Defaulters as compared to Defaulters, the dataset is imbalanced and weights can be added to better classify the 2 classes. We can make use of GridSearch to get the optimal weights. These optimal weights can then be used to tune our models to get better accuracies during prediction.
+
+3. Making use of K-Fold Cross Validation  
+K-Fold Cross Validation can also be used on Support Vector Machines and Logistic Regression to avoid overfitting and get better estimation of the prediction error, leading to more accurate results. However, since this will increase the computational costs of running each model, selecting an appropriate value of k is important, such that the model does not suffer from high variance and biasness.
